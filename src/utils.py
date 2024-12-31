@@ -97,7 +97,7 @@ def get_dataframe(path: str, columns: List = None):
         return pd.DataFrame()
 
 
-def put_dataframe(df: pd.DataFrame, path: str, schema: dict):
+def put_dataframe(df: pd.DataFrame, path: str, schema: dict = None):
     """
     Write a DataFrame to a parquet file.
 
@@ -113,8 +113,9 @@ def put_dataframe(df: pd.DataFrame, path: str, schema: dict):
     if file_name.split('.')[1] != 'parquet':
         raise Exception("Invalid Filetype for Storage (Supported: 'parquet')")
     os.makedirs(key, exist_ok=True)
-    for column, dtype in schema.items():
-        df[column] = df[column].astype(dtype)
+    if schema:
+        for column, dtype in schema.items():
+            df[column] = df[column].astype(dtype)
     df.to_parquet(f"{key}/{file_name}", schema=pa.Schema.from_pandas(df))
 
 

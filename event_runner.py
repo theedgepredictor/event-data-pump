@@ -1,6 +1,7 @@
 import json
 import os
 
+import pandas as pd
 from espn_api_orm.event.api import ESPNEventAPI
 from espn_api_orm.event.schema import Event
 from espn_api_orm.league.api import ESPNLeagueAPI
@@ -12,10 +13,15 @@ import requests
 import datetime
 
 from src.consts import START_SEASONS
-from src.utils import get_seasons_to_update, put_json_file, get_dataframe, find_year_for_season
+from src.utils import get_seasons_to_update, put_json_file, get_dataframe, find_year_for_season, put_dataframe
 
 
 def _process_event_and_roster(event_obj):
+    """
+    Returns a single event dictionary and a list of individual players on roster
+    :param event_obj:
+    :return:
+    """
     competition = event_obj.competitions[0]
 
     # Handle Home and Away team selection from competitors
@@ -34,12 +40,6 @@ def _process_event_and_roster(event_obj):
     except Exception as e:
         home_score = None
         away_score = None
-
-
-    if event_obj.predictor is not None:
-        home_win_prob = event_obj.predictor
-    else:
-        home_win_prob = None
 
     processed_event = {
         'id': event_obj.id,
@@ -60,12 +60,77 @@ def _process_event_and_roster(event_obj):
         'home_score': home_score,
         'away_abbr': away_team.team.abbreviation,
         'home_abbr': home_team.team.abbreviation,
+        'away_win_prob': None,
+        'home_win_prob': None,
+        'away_chance_loss': None,
+        'home_chance_loss': None,
+        'away_chance_tie': None,
+        'home_chance_tie': None,
+        'away_matchup_quality': None,
+        'home_matchup_quality': None,
+        'away_opp_season_strength_fbs_rank': None,
+        'home_opp_season_strength_fbs_rank': None,
+        'away_opp_season_strength_rating': None,
+        'home_opp_season_strength_rating': None,
+        'away_pred_point_diff': None,
+        'home_pred_point_diff': None,
+
     }
 
-    return processed_event, event_obj
+    if event_obj.predictor is not None:
+        for team in ['home', 'away']:
+            for predictor_stat in event_obj.predictor[f'{team}Team']['statistics']:
+                if predictor_stat['name'] == 'gameProjection':
+                    processed_event[f'{team}_win_prob'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'matchupQuality':
+                    processed_event[f'{team}_matchup_quality'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'oppSeasonStrengthFbsRank':
+                    processed_event[f'{team}_opp_season_strength_fbs_rank'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'oppSeasonStrengthRating':
+                    processed_event[f'{team}_opp_season_strength_rating'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'teamChanceLoss':
+                    processed_event[f'{team}_chance_loss'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'teamChanceTie':
+                    processed_event[f'{team}_chance_tie'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
+                elif predictor_stat['name'] == 'teamPredPtDiff':
+                    processed_event[f'{team}_pred_point_diff'] = predictor_stat['value'] if predictor_stat['value'] is not None else float(predictor_stat['displayValue'])
 
 
-def raw_scrape_pump():
+    processed_roster = []
+    if away_team.team.athletes is not None:
+        for away_player in away_team.team.athletes:
+            processed_roster.append(
+                {
+                    'event_id': event_obj.id,
+                    'player_id': away_player['playerId'],
+                    'team_id': away_team.team.id,
+                    'team_abbr': away_team.team.abbreviation,
+                    'period': away_player['period'],
+                    'active': away_player['active'],
+                    'starter': away_player['starter'],
+                    'did_not_play': away_player['didNotPlay'],
+                }
+            )
+    if home_team.team.athletes is not None:
+        for home_player in home_team.team.athletes:
+            processed_roster.append(
+                {
+                    'event_id': event_obj.id,
+                    'player_id': home_player['playerId'],
+                    'team_id': home_team.team.id,
+                    'team_abbr': home_team.team.abbreviation,
+                    'period': home_player['period'],
+                    'active': home_player['active'],
+                    'starter': home_player['starter'],
+                    'did_not_play': home_player['didNotPlay'],
+                }
+            )
+
+
+    return processed_event, processed_roster
+
+
+if __name__ == '__main__':
     root_path = './raw'
 
     sport_league_pairs = list(ESPNSportLeagueTypes)
@@ -102,26 +167,30 @@ def raw_scrape_pump():
         print(f"Running Raw Pump for: {sport_league.value} from {min(update_seasons)}-{max(update_seasons)}")
 
         for update_season in update_seasons:
-            season_path = f"{path}/{update_season}/"
+            season_path = f"{path}{update_season}/"
             if not os.path.exists(season_path):
                 os.makedirs(season_path, exist_ok=True)
 
             processed_df = get_dataframe(f"{processed_events_path}{update_season}.parquet")
 
-            if update_season != find_year_for_season(ESPNSportLeagueTypes.FOOTBALL_NFL):
-                ## From processed
-                existing_games_for_season = [i.split('.')[0] for i in os.listdir(season_path)]
-            else:
-                existing_games_for_season = processed_df
-
             calendar_api = ESPNCalendarAPI(sport_str, league_str, update_season)
             season_types = calendar_api.get_valid_types()
+
             calendar_sections = calendar_api.get_calendar_sections(season_types)
 
-            ### ADD in last run date from processed and go 2 days back
+            if update_season == find_year_for_season(ESPNSportLeagueTypes.FOOTBALL_NFL) and processed_df.shape[0] != 0:
+                ### ADD in last run date from processed and go 2 days back
+                last_valid_date = pd.Timestamp(pd.Timestamp(processed_df[processed_df['status']=='3'].date.max()).to_pydatetime() - datetime.timedelta(days=7))
+                for calendar_section in calendar_sections:
+                    on_days = calendar_section.dates
+                    calendar_section.dates = [day for day in on_days if pd.Timestamp(last_valid_date).to_pydatetime() <= day]
+                existing_games_for_season = list(processed_df[((processed_df['date'] <= last_valid_date) & (processed_df['status']=='3'))].id.values)
+            else:
+                existing_games_for_season = [i.split('.')[0] for i in os.listdir(season_path)]
 
             for calendar_section in calendar_sections:
                 for date in calendar_section.dates:
+                    season_type = calendar_section.seasonType
                     string_date = f"{(date + datetime.timedelta(days=-1)).strftime('%Y%m%d')}-{date.strftime('%Y%m%d')}"
                     scoreboard_api = ESPNScoreboardAPI(sport_str, league_str)
                     scoreboard_obj = scoreboard_api.get_scoreboard(string_date)
@@ -129,8 +198,8 @@ def raw_scrape_pump():
                         event_obj = event
                         event_obj_id = str(event_obj.id)
 
-                        ## Or event is not finished or event is within the past 5 days
-                        if event_obj_id in existing_games_for_season:
+                        ## event is not finished or event is within the past 7 days
+                        if event_obj_id in existing_games_for_season or event.season.type != season_type.value:
                             continue
 
                         event_api = ESPNEventAPI(sport_str, league_str, event_obj.id)
@@ -149,16 +218,31 @@ def raw_scrape_pump():
                         json_event = event.model_dump_json()
                         existing_games_for_season.extend([event_obj_id])
                         put_json_file(f"{season_path}{event_obj_id}.json",json_event)
-            '''
-            for event_id in existing_games_for_season:
-                file_path = os.path.join(season_path, f"{event_id}.json")
-                with open(file_path, 'r') as file:
-                    event_obj = Event.model_validate_json(json.load(file))
-                    processed_event, processed_roster = _process_event_and_roster(event_obj)
-            '''
 
+            ## Check what seasons need to get updated
+            update_seasons = get_seasons_to_update("./events", sport_league)
 
-if __name__ == '__main__':
-    raw_scrape_pump()
+            print(f"Running Processed Pump for: {sport_league.value} from {min(update_seasons)}-{max(update_seasons)}")
+            for update_season in update_seasons:
+                season_path = f"{path}{update_season}/"
 
+                existing_games_for_season = [i.split('.')[0] for i in os.listdir(season_path)]
+                events = []
+                rosters = []
+                for event_id in existing_games_for_season:
+                    file_path = os.path.join(season_path, f"{event_id}.json")
+                    with open(file_path, 'r') as file:
+                        event_obj = Event.model_validate_json(json.load(file))
+                        if event_obj.season.type not in [ESPNSportSeasonTypes.REG.value, ESPNSportSeasonTypes.POST.value]:
+                            file.close()
+                            os.remove(file_path)
+                        else:
+                            processed_event, processed_roster = _process_event_and_roster(event_obj)
+                            events.append(processed_event)
+                            rosters.extend(processed_roster)
+
+                events_df = pd.DataFrame(events)
+                rosters_df = pd.DataFrame(rosters)
+                put_dataframe(events_df, f"{processed_events_path}{update_season}.parquet")
+                put_dataframe(rosters_df, f"{processed_rosters_path}{update_season}.parquet")
 
