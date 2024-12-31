@@ -1,3 +1,4 @@
+import json
 import re
 import pandas as pd
 from espn_api_orm.consts import ESPNSportLeagueTypes
@@ -8,6 +9,18 @@ import os
 from typing import List
 import pyarrow as pa
 
+
+def get_json_file(path):
+    try:
+        with open(path, 'r') as file:
+            return json.load(file)
+    except Exception as e:
+        return {}
+
+# Function to save sport league file
+def put_json_file(path, data):
+    with open(path, 'w') as file:
+        json.dump(data, file, indent=4)
 
 def get_seasons_to_update(root_path, sport):
     """
