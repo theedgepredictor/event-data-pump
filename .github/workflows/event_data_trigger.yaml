@@ -3,7 +3,7 @@ name: Event Data trigger
 
 on:
   schedule:
-    - cron: '0 9 * * 0' # runs at 9:00 UTC every Sunday (4AM EST)
+    - cron: '0 9 * * *' # runs at 9:00 UTC every Sunday (4AM EST)
   workflow_dispatch:
 
 jobs:
