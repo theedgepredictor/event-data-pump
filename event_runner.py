@@ -173,6 +173,10 @@ if __name__ == '__main__':
 
             processed_df = get_dataframe(f"{processed_events_path}{update_season}.parquet")
 
+            processed_rosters_df = get_dataframe(f"{processed_rosters_path}{update_season}.parquet")
+            ## Only keeping cached games where we have the event and roster data
+            processed_df = processed_df[processed_df.id.isin(processed_rosters_df.event_id.unique())].copy()
+
             calendar_api = ESPNCalendarAPI(sport_str, league_str, update_season)
             season_types = calendar_api.get_valid_types()
 
@@ -180,7 +184,7 @@ if __name__ == '__main__':
 
             if update_season == find_year_for_season(ESPNSportLeagueTypes.FOOTBALL_NFL) and processed_df.shape[0] != 0:
                 ### ADD in last run date from processed and go 2 days back
-                last_valid_date = pd.Timestamp(pd.Timestamp(processed_df[processed_df['status']=='3'].date.max()).to_pydatetime() - datetime.timedelta(days=7))
+                last_valid_date = pd.Timestamp(pd.Timestamp(processed_df[((processed_df['status']=='3'))].date.max()).to_pydatetime() - datetime.timedelta(days=7))
                 for calendar_section in calendar_sections:
                     on_days = calendar_section.dates
                     calendar_section.dates = [day for day in on_days if pd.Timestamp(last_valid_date).to_pydatetime() <= day]
@@ -245,4 +249,5 @@ if __name__ == '__main__':
                 rosters_df = pd.DataFrame(rosters)
                 put_dataframe(events_df, f"{processed_events_path}{update_season}.parquet")
                 put_dataframe(rosters_df, f"{processed_rosters_path}{update_season}.parquet")
+
 
