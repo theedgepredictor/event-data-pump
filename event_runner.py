@@ -175,7 +175,8 @@ if __name__ == '__main__':
             if processed_df.shape[0] != 0:
                 processed_rosters_df = get_dataframe(f"{processed_rosters_path}{update_season}.parquet")
                 ## Only keeping cached games where we have the event and roster data
-                processed_df = processed_df[processed_df.id.isin(processed_rosters_df.event_id.unique())].copy()
+                if processed_rosters_df.shape[0] != 0:
+                    processed_df = processed_df[processed_df.id.isin(processed_rosters_df.event_id.unique())].copy()
 
             calendar_api = ESPNCalendarAPI(sport_str, league_str, update_season)
             season_types = calendar_api.get_valid_types()
