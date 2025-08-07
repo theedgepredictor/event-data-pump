@@ -172,17 +172,17 @@ if __name__ == '__main__':
                 os.makedirs(season_path, exist_ok=True)
 
             processed_df = get_dataframe(f"{processed_events_path}{update_season}.parquet")
-
-            processed_rosters_df = get_dataframe(f"{processed_rosters_path}{update_season}.parquet")
-            ## Only keeping cached games where we have the event and roster data
-            processed_df = processed_df[processed_df.id.isin(processed_rosters_df.event_id.unique())].copy()
+            if processed_df.shape[0] != 0:
+                processed_rosters_df = get_dataframe(f"{processed_rosters_path}{update_season}.parquet")
+                ## Only keeping cached games where we have the event and roster data
+                processed_df = processed_df[processed_df.id.isin(processed_rosters_df.event_id.unique())].copy()
 
             calendar_api = ESPNCalendarAPI(sport_str, league_str, update_season)
             season_types = calendar_api.get_valid_types()
 
             calendar_sections = calendar_api.get_calendar_sections(season_types)
 
-            if update_season == find_year_for_season(ESPNSportLeagueTypes.FOOTBALL_NFL) and processed_df.shape[0] != 0:
+            if update_season == find_year_for_season(sport_league) and processed_df.shape[0] != 0:
                 ### ADD in last run date from processed and go 2 days back
                 last_valid_date = pd.Timestamp(pd.Timestamp(processed_df[((processed_df['status']=='3'))].date.max()).to_pydatetime() - datetime.timedelta(days=7))
                 for calendar_section in calendar_sections:
@@ -223,31 +223,29 @@ if __name__ == '__main__':
                         existing_games_for_season.extend([event_obj_id])
                         put_json_file(f"{season_path}{event_obj_id}.json",json_event)
 
-            ## Check what seasons need to get updated
-            update_seasons = get_seasons_to_update("./events", sport_league)
+        ## Check what seasons need to get updated
+        update_seasons = get_seasons_to_update("./events", sport_league)
 
-            print(f"Running Processed Pump for: {sport_league.value} from {min(update_seasons)}-{max(update_seasons)}")
-            for update_season in update_seasons:
-                season_path = f"{path}{update_season}/"
+        print(f"Running Processed Pump for: {sport_league.value} from {min(update_seasons)}-{max(update_seasons)}")
+        for update_season in update_seasons:
+            season_path = f"{path}{update_season}/"
 
-                existing_games_for_season = [i.split('.')[0] for i in os.listdir(season_path)]
-                events = []
-                rosters = []
-                for event_id in existing_games_for_season:
-                    file_path = os.path.join(season_path, f"{event_id}.json")
-                    with open(file_path, 'r') as file:
-                        event_obj = Event.model_validate_json(json.load(file))
-                        if event_obj.season.type not in [ESPNSportSeasonTypes.REG.value, ESPNSportSeasonTypes.POST.value]:
-                            file.close()
-                            os.remove(file_path)
-                        else:
-                            processed_event, processed_roster = _process_event_and_roster(event_obj)
-                            events.append(processed_event)
-                            rosters.extend(processed_roster)
+            existing_games_for_season = [i.split('.')[0] for i in os.listdir(season_path)]
+            events = []
+            rosters = []
+            for event_id in existing_games_for_season:
+                file_path = os.path.join(season_path, f"{event_id}.json")
+                with open(file_path, 'r') as file:
+                    event_obj = Event.model_validate_json(json.load(file))
+                    if event_obj.season.type not in [ESPNSportSeasonTypes.REG.value, ESPNSportSeasonTypes.POST.value]:
+                        file.close()
+                        os.remove(file_path)
+                    else:
+                        processed_event, processed_roster = _process_event_and_roster(event_obj)
+                        events.append(processed_event)
+                        rosters.extend(processed_roster)
 
-                events_df = pd.DataFrame(events)
-                rosters_df = pd.DataFrame(rosters)
-                put_dataframe(events_df, f"{processed_events_path}{update_season}.parquet")
-                put_dataframe(rosters_df, f"{processed_rosters_path}{update_season}.parquet")
-
-
+            events_df = pd.DataFrame(events)
+            rosters_df = pd.DataFrame(rosters)
+            put_dataframe(events_df, f"{processed_events_path}{update_season}.parquet")
+            put_dataframe(rosters_df, f"{processed_rosters_path}{update_season}.parquet")
